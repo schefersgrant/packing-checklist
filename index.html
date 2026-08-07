@@ -130,9 +130,10 @@ const LISTS = [
       ["Pit Supplies", "Snacks & water"]
     ]
   },
-  { id: "team-a", label: "4650", ...teamDefaults() },
-  { id: "team-b", label: "5713", ...teamDefaults() },
-  { id: "team-c", label: "24187", ...teamDefaults() },
+  { id: "team-a", label: "Team 4650", ...teamDefaults() },
+  { id: "team-b", label: "Team 5713", ...teamDefaults() },
+  { id: "team-c", label: "Team 24187", ...teamDefaults() },
+  { id: "team-d", label: "Team D", ...teamDefaults() },
 ];
 
 function teamDefaults(){
@@ -159,8 +160,11 @@ function teamDefaults(){
 
 let db = null;
 let currentListId = LISTS[0].id;
-let unsubscribe = null;
+let unsubscribeItems = null;
+let unsubscribeCategories = null;
 let currentItems = [];
+let currentCategories = [];
+let pendingCategorySelect = null;
 
 function configIsPlaceholder(){
   return firebaseConfig.apiKey === "YOUR_API_KEY";
@@ -195,30 +199,77 @@ function renderTabs(){
     };
     tabsEl.appendChild(btn);
   });
-  populateCategoryDropdown();
 }
 
 function populateCategoryDropdown(){
-  const list = LISTS.find(l => l.id === currentListId);
   const sel = document.getElementById("newItemCategory");
+  const prevValue = sel.value;
   sel.innerHTML = "";
-  list.categories.concat(["Other"]).forEach(cat => {
+  currentCategories.forEach(cat => {
     const opt = document.createElement("option");
-    opt.value = cat; opt.textContent = cat;
+    opt.value = cat.name; opt.textContent = cat.name;
     sel.appendChild(opt);
   });
+  const addOpt = document.createElement("option");
+  addOpt.value = "__add_new__"; addOpt.textContent = "+ Add new category…";
+  sel.appendChild(addOpt);
+
+  if (pendingCategorySelect && currentCategories.some(c => c.name === pendingCategorySelect)){
+    sel.value = pendingCategorySelect;
+    pendingCategorySelect = null;
+  } else if (currentCategories.some(c => c.name === prevValue)){
+    sel.value = prevValue;
+  }
 }
 
+function addCategory(name){
+  const sel = document.getElementById("newItemCategory");
+  const existing = currentCategories.find(c => c.name.toLowerCase() === name.toLowerCase());
+  if (existing){
+    sel.value = existing.name;
+    return;
+  }
+  const maxOrder = currentCategories.reduce((m, c) => Math.max(m, c.order || 0), 0);
+  pendingCategorySelect = name;
+  db.collection("lists").doc(currentListId).collection("categories").add({ name, order: maxOrder + 1 });
+}
+
+document.getElementById("newItemCategory").addEventListener("change", e => {
+  if (e.target.value === "__add_new__"){
+    const name = (prompt("New category name:") || "").trim();
+    if (name){
+      addCategory(name);
+    } else if (currentCategories.length){
+      e.target.value = currentCategories[0].name;
+    }
+  }
+});
+
 async function loadList(listId){
-  if (unsubscribe) unsubscribe();
+  if (unsubscribeItems) unsubscribeItems();
+  if (unsubscribeCategories) unsubscribeCategories();
+  currentCategories = [];
   document.getElementById("main").innerHTML = '<div class="status">Loading…</div>';
 
+  const listDef = LISTS.find(l => l.id === listId);
   const itemsRef = db.collection("lists").doc(listId).collection("items");
+  const categoriesRef = db.collection("lists").doc(listId).collection("categories");
 
-  // Seed defaults if this list is empty (first-ever open).
+  // Seed default categories if this list has none yet (first-ever open).
+  const catSnap = await categoriesRef.limit(1).get();
+  if (catSnap.empty){
+    const catNames = listDef.categories.concat(["Other"]);
+    const batch = db.batch();
+    catNames.forEach((name, i) => {
+      const ref = categoriesRef.doc();
+      batch.set(ref, { name, order: i });
+    });
+    await batch.commit();
+  }
+
+  // Seed default items if this list is empty (first-ever open).
   const snap = await itemsRef.limit(1).get();
   if (snap.empty){
-    const listDef = LISTS.find(l => l.id === listId);
     const batch = db.batch();
     listDef.defaultItems.forEach(([category, text], i) => {
       const ref = itemsRef.doc();
@@ -227,7 +278,13 @@ async function loadList(listId){
     await batch.commit();
   }
 
-  unsubscribe = itemsRef.orderBy("order").onSnapshot(qs => {
+  unsubscribeCategories = categoriesRef.orderBy("order").onSnapshot(qs => {
+    currentCategories = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    populateCategoryDropdown();
+    render();
+  });
+
+  unsubscribeItems = itemsRef.orderBy("order").onSnapshot(qs => {
     currentItems = qs.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   }, err => {
@@ -237,7 +294,6 @@ async function loadList(listId){
 }
 
 function render(){
-  const list = LISTS.find(l => l.id === currentListId);
   const main = document.getElementById("main");
 
   if (currentItems.length === 0){
@@ -253,8 +309,8 @@ function render(){
     '<button class="reset-btn" onclick="resetChecks()">Reset checks</button>' +
     '</div>';
 
-  // group by category, preserving configured category order, then any extras ("Other" etc.)
-  const cats = list.categories.slice();
+  // group by category, preserving stored category order, then any extras (legacy items etc.)
+  const cats = currentCategories.map(c => c.name);
   currentItems.forEach(i => { if (!cats.includes(i.category)) cats.push(i.category); });
 
   cats.forEach(cat => {
