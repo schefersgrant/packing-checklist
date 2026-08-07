@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Packing Checklist</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg:#f5f5f7; --card:#ffffff; --text:#1d1d1f; --muted:#6e6e73;
+    --accent:#0071e3; --border:#e5e5ea; --done:#8e8e93; --danger:#ff3b30;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--text); padding-bottom:80px;
+  }
+  header{
+    position:sticky; top:0; background:var(--bg); z-index:10; padding:16px 16px 0;
+    border-bottom:1px solid var(--border);
+  }
+  h1{font-size:20px; margin:0 0 12px; font-weight:600;}
+  .tabs{display:flex; gap:6px; overflow-x:auto; padding-bottom:10px; -webkit-overflow-scrolling:touch;}
+  .tab{
+    flex:0 0 auto; padding:8px 14px; border-radius:20px; background:var(--card);
+    border:1px solid var(--border); font-size:14px; color:var(--muted); cursor:pointer; white-space:nowrap;
+  }
+  .tab.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+  main{padding:16px; max-width:640px; margin:0 auto;}
+  .list-header{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
+  .progress{font-size:13px; color:var(--muted);}
+  .reset-btn{
+    font-size:13px; color:var(--accent); background:none; border:none; padding:4px 0; cursor:pointer;
+  }
+  .category{background:var(--card); border-radius:12px; margin-bottom:14px; overflow:hidden; border:1px solid var(--border);}
+  .category h2{font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0; padding:10px 14px; border-bottom:1px solid var(--border);}
+  .item{display:flex; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); gap:10px;}
+  .item:last-child{border-bottom:none;}
+  .item input[type=checkbox]{width:20px; height:20px; flex:0 0 auto; accent-color:var(--accent);}
+  .item label{flex:1; font-size:15px; cursor:pointer;}
+  .item.checked label{color:var(--done); text-decoration:line-through;}
+  .item .del{color:var(--danger); font-size:18px; line-height:1; background:none; border:none; padding:4px 6px; cursor:pointer;}
+  .empty{text-align:center; color:var(--muted); font-size:14px; padding:20px;}
+  .addbar{
+    position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--border);
+    padding:10px 12px; display:flex; gap:8px; max-width:640px; margin:0 auto;
+  }
+  .addbar input[type=text]{
+    flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border); font-size:15px;
+  }
+  .addbar select{
+    padding:10px 8px; border-radius:10px; border:1px solid var(--border); font-size:14px; max-width:110px;
+  }
+  .addbar button{
+    padding:10px 16px; border-radius:10px; border:none; background:var(--accent); color:#fff; font-size:15px; cursor:pointer;
+  }
+  .status{text-align:center; color:var(--muted); font-size:13px; padding:20px;}
+  .config-warning{
+    background:#fff3cd; border:1px solid #ffe69c; color:#664d03; padding:12px 16px; margin:16px; border-radius:10px; font-size:14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Packing Checklist</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+
+<main id="main">
+  <div class="status">Loading…</div>
+</main>
+
+<div class="addbar">
+  <input type="text" id="newItemText" placeholder="Add an item…" />
+  <select id="newItemCategory"></select>
+  <button id="addBtn">Add</button>
+</div>
+
+<script>
+/* =========================================================================
+   SETUP: paste your Firebase project config here.
+   Firebase Console → Project settings → General → Your apps → SDK setup
+   ========================================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyAhK2IFwp0U8Bf5H6MCQilitaNQB6INAeY",
+  authDomain: "robotics-packing.firebaseapp.com",
+  projectId: "robotics-packing",
+  storageBucket: "robotics-packing.firebasestorage.app",
+  messagingSenderId: "552895094658",
+  appId: "1:552895094658:web:a1ef4bb6b37c018d88f99b"
+};
+
+/* =========================================================================
+   LISTS CONFIG
+   - Rename tab labels / team names here any time.
+   - "id" must stay stable (it's the Firestore document id) — renaming id
+     after launch will start a fresh empty list.
+   - defaultItems seed a list ONLY the first time it's opened and is empty.
+     Editing this after launch has no effect on lists that already have items;
+     just add/delete items in the app itself at that point.
+   ========================================================================= */
+const LISTS = [
+  {
+    id: "shared", label: "Shared Parts",
+    categories: ["Tools", "Spare Electronics", "Spare Mechanical", "Pit Supplies"],
+    defaultItems: [
+      ["Tools", "Tool box / multitool set"],
+      ["Tools", "Allen key / hex key set"],
+      ["Tools", "Zip ties"],
+      ["Tools", "Electrical tape / gaffer tape"],
+      ["Tools", "Label maker + labels"],
+      ["Tools", "Scissors / wire cutters"],
+      ["Tools", "Extension cord / power strip"],
+      ["Spare Electronics", "Spare Control Hub"],
+      ["Spare Electronics", "Spare Expansion Hub"],
+      ["Spare Electronics", "Spare REV Smart Battery"],
+      ["Spare Electronics", "Spare motors (assorted)"],
+      ["Spare Electronics", "Spare servos (assorted)"],
+      ["Spare Electronics", "Spare wiring / connectors"],
+      ["Spare Electronics", "Spare fuses"],
+      ["Spare Mechanical", "Spare wheels"],
+      ["Spare Mechanical", "Spare screws & nuts (assorted)"],
+      ["Spare Mechanical", "Spare standoffs / spacers"],
+      ["Spare Mechanical", "Extra gears / sprockets"],
+      ["Pit Supplies", "Pit table cloth / banner"],
+      ["Pit Supplies", "Team pit sign"],
+      ["Pit Supplies", "First aid kit"],
+      ["Pit Supplies", "Snacks & water"]
+    ]
+  },
+  { id: "team-a", label: "Team A", ...teamDefaults() },
+  { id: "team-b", label: "Team B", ...teamDefaults() },
+  { id: "team-c", label: "Team C", ...teamDefaults() },
+  { id: "team-d", label: "Team D", ...teamDefaults() },
+];
+
+function teamDefaults(){
+  return {
+    categories: ["Robot & Battery", "Driver Station", "Team Gear"],
+    defaultItems: [
+      ["Robot & Battery", "Competition robot"],
+      ["Robot & Battery", "Charged 12V battery (x2 minimum)"],
+      ["Robot & Battery", "Battery charger + cable"],
+      ["Robot & Battery", "Inspection sticker sheet"],
+      ["Driver Station", "Driver station phone/tablet"],
+      ["Driver Station", "USB cable (phone to Control Hub)"],
+      ["Driver Station", "Charging cable for driver station"],
+      ["Driver Station", "Backup driver station device"],
+      ["Team Gear", "Engineering notebook"],
+      ["Team Gear", "Team shirts / jerseys"],
+      ["Team Gear", "Laptop + charger"],
+      ["Team Gear", "Pit decorations"]
+    ]
+  };
+}
+
+/* ========================================================================= */
+
+let db = null;
+let currentListId = LISTS[0].id;
+let unsubscribe = null;
+let currentItems = [];
+
+function configIsPlaceholder(){
+  return firebaseConfig.apiKey === "YOUR_API_KEY";
+}
+
+function init(){
+  if (configIsPlaceholder()){
+    document.getElementById("main").innerHTML =
+      '<div class="config-warning">This app isn\'t connected to a database yet. ' +
+      'Open index.html, find <code>firebaseConfig</code> near the top of the script, ' +
+      'and paste in your Firebase project\'s config. See the setup guide for step-by-step instructions.</div>';
+    document.querySelector(".addbar").style.display = "none";
+    return;
+  }
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  renderTabs();
+  loadList(currentListId);
+}
+
+function renderTabs(){
+  const tabsEl = document.getElementById("tabs");
+  tabsEl.innerHTML = "";
+  LISTS.forEach(list => {
+    const btn = document.createElement("button");
+    btn.className = "tab" + (list.id === currentListId ? " active" : "");
+    btn.textContent = list.label;
+    btn.onclick = () => {
+      currentListId = list.id;
+      renderTabs();
+      loadList(list.id);
+    };
+    tabsEl.appendChild(btn);
+  });
+  populateCategoryDropdown();
+}
+
+function populateCategoryDropdown(){
+  const list = LISTS.find(l => l.id === currentListId);
+  const sel = document.getElementById("newItemCategory");
+  sel.innerHTML = "";
+  list.categories.concat(["Other"]).forEach(cat => {
+    const opt = document.createElement("option");
+    opt.value = cat; opt.textContent = cat;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadList(listId){
+  if (unsubscribe) unsubscribe();
+  document.getElementById("main").innerHTML = '<div class="status">Loading…</div>';
+
+  const itemsRef = db.collection("lists").doc(listId).collection("items");
+
+  // Seed defaults if this list is empty (first-ever open).
+  const snap = await itemsRef.limit(1).get();
+  if (snap.empty){
+    const listDef = LISTS.find(l => l.id === listId);
+    const batch = db.batch();
+    listDef.defaultItems.forEach(([category, text], i) => {
+      const ref = itemsRef.doc();
+      batch.set(ref, { text, category, checked: false, order: i, createdAt: Date.now() });
+    });
+    await batch.commit();
+  }
+
+  unsubscribe = itemsRef.orderBy("order").onSnapshot(qs => {
+    currentItems = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  }, err => {
+    document.getElementById("main").innerHTML =
+      '<div class="config-warning">Couldn\'t load this list: ' + err.message + '</div>';
+  });
+}
+
+function render(){
+  const list = LISTS.find(l => l.id === currentListId);
+  const main = document.getElementById("main");
+
+  if (currentItems.length === 0){
+    main.innerHTML = '<div class="empty">No items yet. Add one below.</div>';
+    return;
+  }
+
+  const total = currentItems.length;
+  const checkedCount = currentItems.filter(i => i.checked).length;
+
+  let html = '<div class="list-header">' +
+    '<span class="progress">' + checkedCount + ' / ' + total + ' packed</span>' +
+    '<button class="reset-btn" onclick="resetChecks()">Reset checks</button>' +
+    '</div>';
+
+  // group by category, preserving configured category order, then any extras ("Other" etc.)
+  const cats = list.categories.slice();
+  currentItems.forEach(i => { if (!cats.includes(i.category)) cats.push(i.category); });
+
+  cats.forEach(cat => {
+    const items = currentItems.filter(i => i.category === cat);
+    if (items.length === 0) return;
+    html += '<div class="category"><h2>' + escapeHtml(cat) + '</h2>';
+    items.forEach(item => {
+      html += '<div class="item ' + (item.checked ? "checked" : "") + '">' +
+        '<input type="checkbox" id="chk-' + item.id + '" ' + (item.checked ? "checked" : "") +
+        ' onchange="toggleItem(\'' + item.id + '\', this.checked)">' +
+        '<label for="chk-' + item.id + '">' + escapeHtml(item.text) + '</label>' +
+        '<button class="del" onclick="deleteItem(\'' + item.id + '\')">×</button>' +
+        '</div>';
+    });
+    html += '</div>';
+  });
+
+  main.innerHTML = html;
+}
+
+function escapeHtml(s){
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function toggleItem(itemId, checked){
+  db.collection("lists").doc(currentListId).collection("items").doc(itemId).update({ checked });
+}
+
+function deleteItem(itemId){
+  db.collection("lists").doc(currentListId).collection("items").doc(itemId).delete();
+}
+
+function resetChecks(){
+  const batch = db.batch();
+  currentItems.forEach(item => {
+    const ref = db.collection("lists").doc(currentListId).collection("items").doc(item.id);
+    batch.update(ref, { checked: false });
+  });
+  batch.commit();
+}
+
+document.getElementById("addBtn").onclick = addItem;
+document.getElementById("newItemText").addEventListener("keydown", e => {
+  if (e.key === "Enter") addItem();
+});
+
+function addItem(){
+  const textEl = document.getElementById("newItemText");
+  const catEl = document.getElementById("newItemCategory");
+  const text = textEl.value.trim();
+  if (!text) return;
+  const maxOrder = currentItems.reduce((m, i) => Math.max(m, i.order || 0), 0);
+  db.collection("lists").doc(currentListId).collection("items").add({
+    text, category: catEl.value, checked: false, order: maxOrder + 1, createdAt: Date.now()
+  });
+  textEl.value = "";
+  textEl.focus();
+}
+
+init();
+</script>
+</body>
+</html>
